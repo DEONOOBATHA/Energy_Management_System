@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  monitoring_database:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: monitoring
+    ports:
+      - "5436:5432"
+    volumes:
+      - monitoring_db_data:/var/lib/postgresql
+    networks:
+      - sd-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  monitoring-service:
+    image: monitoring-service:latest
+    environment:
+      DB_IP: monitoring_database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: monitoring
+      PORT: 8083
+      SYNC_RABBITMQ_HOST: synch-rabbitmq
+      SYNC_RABBITMQ_PORT: 5672
+      SYNC_RABBITMQ_USER: root
+      SYNC_RABBITMQ_PASS: root
+      DATA_COLLECTION_RABBITMQ_HOST: data-collection-broker
+      DATA_COLLECTION_RABBITMQ_PORT: 5672
+      DATA_COLLECTION_RABBITMQ_USER: root
+      DATA_COLLECTION_RABBITMQ_PASS: root
+    networks:
+      - sd-network
+    deploy:
+      replicas: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.monitoring-service.rule=Host(`localhost`) && PathPrefix(`/api/energy`)"
+        - "traefik.http.routers.monitoring-service.entrypoints=web"
+        - "traefik.http.routers.monitoring-service.service=monitoring-service"
+        - "traefik.http.services.monitoring-service.loadbalancer.server.port=8083"
+        - "traefik.http.routers.monitoring-service.middlewares=cors-headers@file"
+        - "traefik.http.routers.monitoring-service.priority=100"
+
+volumes:
+  monitoring_db_data:
+
+networks:
+  sd-network:
+    driver: overlay
+    attachable: true

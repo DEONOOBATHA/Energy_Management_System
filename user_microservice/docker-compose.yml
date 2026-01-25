@@ -1,0 +1,67 @@
+services:
+  user-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      user_database:
+        condition: service_healthy
+    environment:
+      DB_IP: user_database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: example_db
+      JWT_KEY: 94c4118662b883859f9a36738c2884eea26ce9bf437823fe0dfcc11e405c045c
+      JWT_EXPIRATION_HOURS: 1
+      PORT: 8081
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+    ports:
+      - "8081:8081"
+    networks:
+      - sd-network
+    labels:
+      - "traefik.enable=true"
+      # Main API routes with strip-api middleware
+      - "traefik.http.routers.user-service.rule=Host(`localhost`) && PathPrefix(`/api/people`)"
+      - "traefik.http.routers.user-service.entrypoints=web"
+      - "traefik.http.routers.user-service.priority=100"
+      - "traefik.http.routers.user-service.middlewares=strip-api@file,cors-headers@file"
+      - "traefik.http.services.user-service.loadbalancer.server.port=8081"
+      # Swagger routes WITHOUT strip-api middleware
+      - "traefik.http.routers.user-swagger.rule=Host(`localhost`) && (PathPrefix(`/user-swagger-ui`) || PathPrefix(`/user/v3/api-docs`))"
+      - "traefik.http.routers.user-swagger.entrypoints=web"
+      - "traefik.http.routers.user-swagger.priority=200"
+      - "traefik.http.routers.user-swagger.middlewares=cors-headers@file"
+      - "traefik.http.routers.user-swagger.service=user-service"
+
+  user_database:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: example_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    networks:
+      - sd-network
+    volumes:
+      - user_postgres_data:/var/lib/postgresql
+    ports:
+      - "5435:5432"
+
+volumes:
+  user_postgres_data:
+
+networks:
+  sd-network:
+    external: true
+    name: synch-rabbitmq_sd-network

@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  chat-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chat-service
+    ports:
+      - "8085:8085"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://chat-db:5432/chatdb
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+
+      SPRING_RABBITMQ_HOST: synch-rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: root
+      SPRING_RABBITMQ_PASSWORD: root
+
+      GOOGLE_AI_API_KEY: ${GOOGLE_AI_API_KEY:-}
+
+      SERVER_PORT: 8085
+    depends_on:
+      - chat-db
+    networks:
+      - chat-network
+      - sd-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.chat.rule=Host(`localhost`) && PathPrefix(`/api/chat`)"
+      - "traefik.http.routers.chat.entrypoints=web"
+      - "traefik.http.services.chat.loadbalancer.server.port=8085"
+
+  chat-db:
+    image: postgres:15-alpine
+    container_name: chat-db
+    environment:
+      POSTGRES_DB: chatdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    ports:
+      - "5438:5432"
+    volumes:
+      - chat-db-data:/var/lib/postgresql/data
+    networks:
+      - chat-network
+
+volumes:
+  chat-db-data:
+
+networks:
+  chat-network:
+    driver: bridge
+  sd-network:
+    external: true
+    name: synch-rabbitmq_sd-network

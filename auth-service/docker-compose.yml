@@ -1,0 +1,58 @@
+services:
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      auth_database:
+        condition: service_healthy
+    environment:
+      DB_IP: auth_database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: auth
+      JWT_KEY: 94c4118662b883859f9a36738c2884eea26ce9bf437823fe0dfcc11e405c045c
+      JWT_EXPIRATION_HOURS: 1
+      PORT: 8080
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+    networks:
+      - sd-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth-service.rule=Host(`localhost`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.auth-service.entrypoints=web"
+      - "traefik.http.routers.auth-service.priority=100"
+      - "traefik.http.routers.auth-service.middlewares=strip-api@file,cors-headers@file"
+      - "traefik.http.services.auth-service.loadbalancer.server.port=8080"
+
+  auth_database:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: auth
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    networks:
+      - sd-network
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql
+    ports:
+      - "5434:5432"
+
+volumes:
+  auth_postgres_data:
+
+networks:
+  sd-network:
+    external: true
+    name: synch-rabbitmq_sd-network

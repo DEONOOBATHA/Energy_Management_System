@@ -1,0 +1,70 @@
+services:
+  device-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      device_database:
+        condition: service_healthy
+    environment:
+      DB_IP: device_database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: device
+      PORT: 8082
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+    ports:
+      - "8082:8082"
+    networks:
+      - sd-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.device-service-devices.rule=Host(`localhost`) && PathPrefix(`/api/devices`)"
+      - "traefik.http.routers.device-service-devices.entrypoints=web"
+      - "traefik.http.routers.device-service-devices.priority=100"
+      - "traefik.http.routers.device-service-devices.middlewares=strip-api@file,cors-headers@file"
+      - "traefik.http.routers.device-service-persons.rule=Host(`localhost`) && PathPrefix(`/api/persons`)"
+      - "traefik.http.routers.device-service-persons.entrypoints=web"
+      - "traefik.http.routers.device-service-persons.priority=100"
+      - "traefik.http.routers.device-service-persons.middlewares=strip-api@file,cors-headers@file"
+      - "traefik.http.routers.device-service-userdevices.rule=Host(`localhost`) && PathPrefix(`/api/user_devices`)"
+      - "traefik.http.routers.device-service-userdevices.entrypoints=web"
+      - "traefik.http.routers.device-service-userdevices.priority=100"
+      - "traefik.http.routers.device-service-userdevices.middlewares=strip-api@file,cors-headers@file"
+      - "traefik.http.routers.device-swagger.rule=Host(`localhost`) && (PathPrefix(`/device-swagger-ui`) || PathPrefix(`/device/v3/api-docs`))"
+      - "traefik.http.routers.device-swagger.entrypoints=web"
+      - "traefik.http.routers.device-swagger.priority=200"
+      - "traefik.http.routers.device-swagger.middlewares=cors-headers@file"
+      - "traefik.http.services.device-service.loadbalancer.server.port=8082"
+
+  device_database:
+    image: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: device
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    networks:
+      - sd-network
+    volumes:
+      - device_postgres_data:/var/lib/postgresql
+    ports:
+      - "5433:5432"
+
+volumes:
+  device_postgres_data:
+
+networks:
+  sd-network:
+    external: true
+    name: synch-rabbitmq_sd-network

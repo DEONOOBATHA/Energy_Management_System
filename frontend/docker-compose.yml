@@ -1,0 +1,22 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    networks:
+      - sd-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`localhost`) && PathPrefix(`/`) && !PathPrefix(`/api`) && !PathPrefix(`/user-swagger-ui`) && !PathPrefix(`/device-swagger-ui`) && !PathPrefix(`/user/v3/api-docs`) && !PathPrefix(`/device/v3/api-docs`)"
+      - "traefik.http.routers.frontend.entrypoints=web"
+      - "traefik.http.routers.frontend.priority=1"
+      - "traefik.http.services.frontend.loadbalancer.server.port=80"
+    environment:
+      - NODE_ENV=production
+
+networks:
+  sd-network:
+    external: true
+    name: synch-rabbitmq_sd-network

@@ -1,0 +1,30 @@
+services:
+  energy-simulator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: energy-simulator
+    restart: unless-stopped
+    environment:
+      RABBITMQ_HOST: data-collection-broker
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+      INTERVAL_SECONDS: 30  # Send data every 30 seconds (for demo)
+      # Database connection (to auto-fetch user_id from device association)
+      DB_HOST: device_microservice-device_database-1
+      DB_PORT: 5432
+      DB_NAME: device
+      DB_USER: postgres
+      DB_PASSWORD: root
+      # Single device configuration (change this UUID for demo, user_id auto-fetched)
+      DEVICE_ID: "2bb2b612-1204-482c-9a59-1f323aba9780"
+    networks:
+      - sd-network
+    labels:
+      - "app=energy-simulator"
+
+networks:
+  sd-network:
+    external: true
+    name: synch-rabbitmq_sd-network

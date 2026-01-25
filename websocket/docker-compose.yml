@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  websocket-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: websocket-service
+    ports:
+      - "8084:8084"
+    environment:
+      # Spring Boot direct env overrides
+      SPRING_DATASOURCE_URL: jdbc:postgresql://websocket-db:5432/websocket
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+
+      SPRING_RABBITMQ_HOST: synch-rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: root
+      SPRING_RABBITMQ_PASSWORD: root
+
+      SERVER_PORT: 8084
+
+      # JWT Configuration (optional)
+      JWT_KEY: ${JWT_KEY:-your-secret-key-here}
+    depends_on:
+      - websocket-db
+    networks:
+      - websocket-network
+      - sd-network
+
+  websocket-db:
+    image: postgres:15-alpine
+    container_name: websocket-db
+    environment:
+      POSTGRES_DB: websocket
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+    ports:
+      - "5437:5432"
+    volumes:
+      - websocket-db-data:/var/lib/postgresql/data
+    networks:
+      - websocket-network
+
+volumes:
+  websocket-db-data:
+
+networks:
+  websocket-network:
+    driver: bridge
+  sd-network:
+    external: true
+    name: synch-rabbitmq_sd-network

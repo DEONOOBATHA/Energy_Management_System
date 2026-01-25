@@ -1,0 +1,423 @@
+version: '3.8'
+
+services:
+  # ============= GATEWAY (TRAEFIK) =============
+  traefik:
+    image: traefik:v2.10
+    ports:
+      - "80:80"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./gateway/config/traefik.yaml:/etc/traefik/traefik.yaml:ro
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  # ============= RABBITMQ - SYNC =============
+  synch-rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: root
+      RABBITMQ_DEFAULT_PASS: root
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  # ============= RABBITMQ - DATA COLLECTION =============
+  data-collection-broker:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: root
+      RABBITMQ_DEFAULT_PASS: root
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    volumes:
+      - data_collection_rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  # ============= USER SERVICE =============
+  user_database:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: example_db
+    ports:
+      - "5435:5432"
+    volumes:
+      - user_postgres_data:/var/lib/postgresql
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  user-service:
+    image: user_microservice:latest
+    environment:
+      DB_IP: user_database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: example_db
+      JWT_KEY: 94c4118662b883859f9a36738c2884eea26ce9bf437823fe0dfcc11e405c045c
+      JWT_EXPIRATION_HOURS: 1
+      PORT: 8081
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.user-service.rule=Host(`localhost`) && PathPrefix(`/api/people`)"
+        - "traefik.http.routers.user-service.entrypoints=web"
+        - "traefik.http.routers.user-service.priority=100"
+        - "traefik.http.routers.user-service.middlewares=strip-api@file,cors-headers@file"
+        - "traefik.http.services.user-service.loadbalancer.server.port=8081"
+        - "traefik.http.routers.user-swagger.rule=Host(`localhost`) && (PathPrefix(`/user-swagger-ui`) || PathPrefix(`/user/v3/api-docs`))"
+        - "traefik.http.routers.user-swagger.entrypoints=web"
+        - "traefik.http.routers.user-swagger.priority=200"
+        - "traefik.http.routers.user-swagger.middlewares=cors-headers@file"
+        - "traefik.http.routers.user-swagger.service=user-service"
+
+  # ============= DEVICE SERVICE =============
+  device_database:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: device
+    ports:
+      - "5433:5432"
+    volumes:
+      - device_postgres_data:/var/lib/postgresql
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  device-service:
+    image: device_microservice:latest
+    environment:
+      DB_IP: device_database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: device
+      PORT: 8082
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.device-service-devices.rule=Host(`localhost`) && PathPrefix(`/api/devices`)"
+        - "traefik.http.routers.device-service-devices.entrypoints=web"
+        - "traefik.http.routers.device-service-devices.priority=100"
+        - "traefik.http.routers.device-service-devices.middlewares=strip-api@file,cors-headers@file"
+        - "traefik.http.routers.device-service-persons.rule=Host(`localhost`) && PathPrefix(`/api/persons`)"
+        - "traefik.http.routers.device-service-persons.entrypoints=web"
+        - "traefik.http.routers.device-service-persons.priority=100"
+        - "traefik.http.routers.device-service-persons.middlewares=strip-api@file,cors-headers@file"
+        - "traefik.http.routers.device-service-userdevices.rule=Host(`localhost`) && PathPrefix(`/api/user_devices`)"
+        - "traefik.http.routers.device-service-userdevices.entrypoints=web"
+        - "traefik.http.routers.device-service-userdevices.priority=100"
+        - "traefik.http.routers.device-service-userdevices.middlewares=strip-api@file,cors-headers@file"
+        - "traefik.http.routers.device-swagger.rule=Host(`localhost`) && (PathPrefix(`/device-swagger-ui`) || PathPrefix(`/device/v3/api-docs`))"
+        - "traefik.http.routers.device-swagger.entrypoints=web"
+        - "traefik.http.routers.device-swagger.priority=200"
+        - "traefik.http.routers.device-swagger.middlewares=cors-headers@file"
+        - "traefik.http.services.device-service.loadbalancer.server.port=8082"
+
+  # ============= MONITORING SERVICE (3 REPLICAS) =============
+  monitoring_database:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: monitoring
+    ports:
+      - "5436:5432"
+    volumes:
+      - monitoring_db_data:/var/lib/postgresql
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  monitoring-service:
+    image: monitoring_microservice:latest
+    environment:
+      DB_IP: monitoring_database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: monitoring
+      PORT: 8083
+      SYNC_RABBITMQ_HOST: synch-rabbitmq
+      SYNC_RABBITMQ_PORT: 5672
+      SYNC_RABBITMQ_USER: root
+      SYNC_RABBITMQ_PASS: root
+      DATA_COLLECTION_RABBITMQ_HOST: data-collection-broker
+      DATA_COLLECTION_RABBITMQ_PORT: 5672
+      DATA_COLLECTION_RABBITMQ_USER: root
+      DATA_COLLECTION_RABBITMQ_PASS: root
+    networks:
+      - sd-network
+    deploy:
+      replicas: 3
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.monitoring-service.rule=Host(`localhost`) && PathPrefix(`/api/energy`)"
+        - "traefik.http.routers.monitoring-service.entrypoints=web"
+        - "traefik.http.routers.monitoring-service.service=monitoring-service"
+        - "traefik.http.services.monitoring-service.loadbalancer.server.port=8083"
+        - "traefik.http.routers.monitoring-service.middlewares=cors-headers@file"
+        - "traefik.http.routers.monitoring-service.priority=100"
+
+  # ============= AUTH SERVICE =============
+  auth-database:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: auth
+    ports:
+      - "5434:5432"
+    volumes:
+      - auth_db_data:/var/lib/postgresql
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  auth-service:
+    image: auth-service:latest
+    environment:
+      DB_IP: auth-database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: auth
+      JWT_KEY: 94c4118662b883859f9a36738c2884eea26ce9bf437823fe0dfcc11e405c045c
+      JWT_EXPIRATION_HOURS: 1
+      PORT: 8084
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.auth-service.rule=Host(`localhost`) && PathPrefix(`/api/auth`)"
+        - "traefik.http.routers.auth-service.entrypoints=web"
+        - "traefik.http.routers.auth-service.priority=100"
+        - "traefik.http.routers.auth-service.middlewares=strip-api@file,cors-headers@file"
+        - "traefik.http.services.auth-service.loadbalancer.server.port=8084"
+        - "traefik.http.routers.auth-swagger.rule=Host(`localhost`) && (PathPrefix(`/auth-swagger-ui`) || PathPrefix(`/auth/v3/api-docs`))"
+        - "traefik.http.routers.auth-swagger.entrypoints=web"
+        - "traefik.http.routers.auth-swagger.priority=200"
+        - "traefik.http.routers.auth-swagger.middlewares=cors-headers@file"
+        - "traefik.http.routers.auth-swagger.service=auth-service"
+
+  # ============= CHAT SERVICE =============
+  chat-database:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: chat
+    ports:
+      - "5437:5432"
+    volumes:
+      - chat_db_data:/var/lib/postgresql
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  chat-service:
+    image: chat-service:latest
+    environment:
+      DB_IP: chat-database
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DB_DBNAME: chat
+      PORT: 8085
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-your-api-key-here}
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.chat-service.rule=Host(`localhost`) && PathPrefix(`/api/chat`)"
+        - "traefik.http.routers.chat-service.entrypoints=web"
+        - "traefik.http.routers.chat-service.priority=100"
+        - "traefik.http.routers.chat-service.middlewares=cors-headers@file"
+        - "traefik.http.services.chat-service.loadbalancer.server.port=8085"
+        - "traefik.http.routers.chat-swagger.rule=Host(`localhost`) && (PathPrefix(`/chat-swagger-ui`) || PathPrefix(`/chat/v3/api-docs`))"
+        - "traefik.http.routers.chat-swagger.entrypoints=web"
+        - "traefik.http.routers.chat-swagger.priority=200"
+        - "traefik.http.routers.chat-swagger.middlewares=cors-headers@file"
+        - "traefik.http.routers.chat-swagger.service=chat-service"
+
+  # ============= WEBSOCKET SERVICE =============
+  websocket-database:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: websocket
+    ports:
+      - "5438:5432"
+    volumes:
+      - websocket_db_data:/var/lib/postgresql
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  websocket-service:
+    image: websocket:latest
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://websocket-database:5432/websocket
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: root
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SERVER_PORT: 8086
+      PORT: 8086
+      RABBITMQ_HOST: synch-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+      SPRING_RABBITMQ_HOST: synch-rabbitmq
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: root
+      SPRING_RABBITMQ_PASSWORD: root
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.websocket-service.rule=Host(`localhost`) && PathPrefix(`/ws`)"
+        - "traefik.http.routers.websocket-service.entrypoints=web"
+        - "traefik.http.routers.websocket-service.priority=100"
+        - "traefik.http.routers.websocket-service.middlewares=cors-headers@file"
+        - "traefik.http.services.websocket-service.loadbalancer.server.port=8086"
+
+  # ============= LOAD BALANCER =============
+  load-balancer:
+    image: load-balancer:latest
+    environment:
+      SPRING_RABBITMQ_HOST: data-collection-broker
+      SPRING_RABBITMQ_PORT: 5672
+      SPRING_RABBITMQ_USERNAME: root
+      SPRING_RABBITMQ_PASSWORD: root
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+
+  # ============= FRONTEND =============
+  frontend:
+    image: frontend:latest
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      labels:
+        - "traefik.enable=true"
+        - "traefik.http.routers.frontend.rule=Host(`localhost`) && PathPrefix(`/`) && !PathPrefix(`/api`) && !PathPrefix(`/user-swagger-ui`) && !PathPrefix(`/device-swagger-ui`) && !PathPrefix(`/user/v3/api-docs`) && !PathPrefix(`/device/v3/api-docs`)"
+        - "traefik.http.routers.frontend.entrypoints=web"
+        - "traefik.http.routers.frontend.priority=1"
+        - "traefik.http.services.frontend.loadbalancer.server.port=80"
+
+  # ============= ENERGY SIMULATORS =============
+  energy-simulator-device1:
+    image: energy-simulator:latest
+    environment:
+      RABBITMQ_HOST: data-collection-broker
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+      INTERVAL_SECONDS: 30
+      DB_HOST: device_database
+      DB_PORT: 5432
+      DB_NAME: device
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DEVICE_ID: "e057aa7e-c619-41e2-b7b7-a2fb7c038626"
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  energy-simulator-device2:
+    image: energy-simulator:latest
+    environment:
+      RABBITMQ_HOST: data-collection-broker
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: root
+      RABBITMQ_PASS: root
+      INTERVAL_SECONDS: 30
+      DB_HOST: device_database
+      DB_PORT: 5432
+      DB_NAME: device
+      DB_USER: postgres
+      DB_PASSWORD: root
+      DEVICE_ID: "95a0da6b-f138-41b3-a949-cbd708b3e233"
+    networks:
+      - sd-network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+volumes:
+  rabbitmq_data:
+  data_collection_rabbitmq_data:
+  user_postgres_data:
+  device_postgres_data:
+  monitoring_db_data:
+  auth_db_data:
+  chat_db_data:
+  websocket_db_data:
+
+networks:
+  sd-network:
+    driver: overlay
+    attachable: true
