@@ -52,7 +52,6 @@ flowchart LR
 
 ## My Role / What I Built
 
-> Adjust this section to reflect your personal contribution.
 
 The repository covers the full stack: the backend microservices, the messaging and load-balancing layer, the Swarm deployment, and the React frontend.
 
