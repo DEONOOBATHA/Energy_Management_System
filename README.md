@@ -119,7 +119,6 @@ The repository covers the full stack: the backend microservices, the messaging a
    docker stack ps sd --filter "desired-state=running"
    ```
 
-> Default credentials and keys in the compose and stack files are for local development only. Replace them for any real deployment.
 
 ## Example Usage
 
